@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-	syoboi "github.com/yasamari/kanan"
+	"github.com/yasamari/kanan/pkg/syoboi"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 		// Found program: 7784, Episode 3
 		// Title: 一畳間まんきつ暮らし！
 		Action: func(context.Context, *cli.Command) error {
-			syoboiClient := syoboi.NewSyoboiClient()
+			syoboiClient := syoboi.NewClient()
 
 			// BS日テレ 2026/04/27 23:00-23:30 一畳間まんきつ暮らし！ 第3話
 			const channelName = "BS日テレ"

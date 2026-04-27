@@ -29,7 +29,7 @@
           pname = "kanan";
           version = builtins.substring 0 8 (self.lastModifiedDate or "19700101");
           src = self.outPath;
-          vendorHash = null;
+          vendorHash = "sha256-n9x5Tkw0lR5N/k9AWt662l1ZnrQZV1UB6OF7vV1C3ZE=";
           subPackages = [ "cmd/kanan" ];
           meta = with pkgs.lib; {
             mainProgram = "kanan";

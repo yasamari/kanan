@@ -62,7 +62,7 @@ type Title struct {
 	SubTitles string `xml:"SubTitles"`
 }
 
-type SyoboiClient interface {
+type Client interface {
 	SearchProgramsByChannelAndTime(channelID int, startTime, endTime time.Time) ([]Program, error)
 	GetTitleByID(titleID int64) (*Title, error)
 	GetChannels() ([]Channel, error)
@@ -73,14 +73,14 @@ const (
 	stTimeFormat = "20060102_150405"
 )
 
-type syoboiClient struct {
+type client struct {
 	client *http.Client
 }
 
-var _ SyoboiClient = (*syoboiClient)(nil)
+var _ Client = (*client)(nil)
 
-func NewSyoboiClient() *syoboiClient {
-	return &syoboiClient{
+func NewClient() *client {
+	return &client{
 		client: &http.Client{},
 	}
 }
@@ -101,7 +101,7 @@ func createRequest(url string) (*http.Request, error) {
 	return req, nil
 }
 
-func (c *syoboiClient) SearchProgramsByChannelAndTime(channelID int, startTime, endTime time.Time) ([]Program, error) {
+func (c *client) SearchProgramsByChannelAndTime(channelID int, startTime, endTime time.Time) ([]Program, error) {
 	// 20260102_000000-20261002_235959
 	stTime := fmt.Sprintf("%s-%s", startTime.Format(stTimeFormat), endTime.Format(stTimeFormat))
 
@@ -135,7 +135,7 @@ func (c *syoboiClient) SearchProgramsByChannelAndTime(channelID int, startTime, 
 	return progLookupResponse.ProgItems, nil
 }
 
-func (c *syoboiClient) GetTitleByID(titleID int64) (*Title, error) {
+func (c *client) GetTitleByID(titleID int64) (*Title, error) {
 	u, _ := url.Parse(baseURL)
 	q := u.Query()
 	q.Add("Command", "TitleLookup")
@@ -169,7 +169,7 @@ func (c *syoboiClient) GetTitleByID(titleID int64) (*Title, error) {
 	return &titleLookupResponse.TitleItems[0], nil
 }
 
-func (c *syoboiClient) GetChannels() ([]Channel, error) {
+func (c *client) GetChannels() ([]Channel, error) {
 	u, _ := url.Parse(baseURL)
 	q := u.Query()
 	q.Add("Command", "ChLookup")
