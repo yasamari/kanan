@@ -17,7 +17,7 @@ type Program struct {
 	StartOffset int    `xml:"StOffset"`
 	EndTime     string `xml:"EdTime"`
 	Count       int    `xml:"Count"`
-	SubTitle    string `xml:"SubTitle"`
+	STSubTitle  string `xml:"STSubTitle"`
 	Comment     string `xml:"ProgComment"`
 	Flag        int    `xml:"Flag"`
 	Deleted     int    `xml:"Deleted"`
@@ -108,6 +108,7 @@ func (c *client) SearchProgramsByChannelAndTime(channelID int, startTime, endTim
 	u, _ := url.Parse(baseURL)
 	q := u.Query()
 	q.Add("Command", "ProgLookup")
+	q.Add("JOIN", "SubTitles")
 	q.Add("ChID", strconv.Itoa(channelID))
 	q.Add("StTime", stTime)
 	u.RawQuery = q.Encode()

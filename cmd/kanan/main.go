@@ -67,7 +67,7 @@ func main() {
 			if err != nil {
 				return fmt.Errorf("failed to get title: %w", err)
 			}
-			fmt.Printf("Title: %s\n", title.Title)
+			fmt.Printf("Title: %s, SubTitle: %s\n", title.Title, program.STSubTitle)
 
 			return nil
 		},
