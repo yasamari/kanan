@@ -32,6 +32,8 @@ const (
 )
 
 func (p *processor) Process(path string, rootDir string, dryRun bool) error {
+	fmt.Printf("Processing file: %s\n", path)
+
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
@@ -62,28 +64,30 @@ func (p *processor) Process(path string, rootDir string, dryRun bool) error {
 	seasonDir := fmt.Sprintf(seasonDirFormat, tmdbInfo.SeasonNumber, syoboiInfo.TitleID)
 	episodeFile := fmt.Sprintf(episodeFileFormat, tmdbInfo.EpisodeTitle, tmdbInfo.SeasonNumber, tmdbInfo.EpisodeNumber, syoboiInfo.ID, fileExt)
 
-	if !dryRun {
-		dirPath := filepath.Join(rootDir, seriesDir, seasonDir)
+	dirPath := filepath.Join(rootDir, seriesDir, seasonDir)
 
+	if !dryRun {
 		err = os.MkdirAll(dirPath, 0755)
 		if err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
+	}
 
-		symlinkPath := filepath.Join(dirPath, episodeFile)
+	symlinkPath := filepath.Join(dirPath, episodeFile)
 
-		_, err = os.Stat(symlinkPath)
-		if err == nil {
-			fmt.Printf("Symlink already exists: %s\n", symlinkPath)
-			return nil
-		}
+	_, err = os.Stat(symlinkPath)
+	if err == nil {
+		fmt.Printf("Symlink already exists: %s\n", symlinkPath)
+		return nil
+	}
 
+	if !dryRun {
 		err = os.Symlink(path, symlinkPath)
 		if err != nil {
 			return fmt.Errorf("failed to create symlink: %w", err)
 		}
-		fmt.Printf("Created symlink: %s -> %s\n", symlinkPath, path)
 	}
+	fmt.Printf("Created symlink: %s\n", symlinkPath)
 
 	return nil
 }
