@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"time"
@@ -36,10 +37,14 @@ func (p *processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, erro
 		return prog, fmt.Errorf("failed to search programs: %w", err)
 	}
 
+	slog.Debug("Found Syoboi programs", "count", len(programs))
+
 	program, err := filterSyoboiPrograms(programs, info)
 	if err != nil {
 		return prog, fmt.Errorf("failed to filter programs: %w", err)
 	}
+
+	slog.Debug("Matched Syoboi program", "titleID", program.TitleID, "subTitle", program.STSubTitle, "count", program.Count)
 
 	programTitle, err := p.syoboiClient.GetTitleByID(int64(program.TitleID))
 	if err != nil {
@@ -47,12 +52,16 @@ func (p *processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, erro
 	}
 	title := programTitle.Title
 
+	slog.Debug("Got Syoboi title", "title", title, "shortTitle", programTitle.ShortTitle)
+
 	// 短いタイトルのほうがシーズンを抽出しやすいので優先する
 	if programTitle.ShortTitle != "" {
 		title = programTitle.ShortTitle
 	}
 
 	season, title := cutSeasonFromSyoboiTitle(title)
+
+	slog.Debug("Extracted season from title", "season", season, "title", title)
 
 	prog.ID = program.ID
 	prog.TitleID = program.TitleID
@@ -84,7 +93,10 @@ func filterSyoboiPrograms(programs []syoboi.Program, info record.Info) (*syoboi.
 
 		if startTime.Equal(info.StartTime) && endTime.Equal(info.StartTime.Add(info.Duration)) {
 			filtered = append(filtered, p)
+			slog.Debug("Program time matched", "programID", p.ID, "startTime", startTime, "endTime", endTime)
+			continue
 		}
+		slog.Debug("Program time did not match", "programID", p.ID, "startTime", startTime, "endTime", endTime)
 	}
 	if len(filtered) == 0 || len(filtered) > 1 {
 		return nil, fmt.Errorf("program not found")

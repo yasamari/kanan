@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/yasamari/kanan/internal/util"
 )
 
@@ -62,33 +63,50 @@ func (p *processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 			return nil, fmt.Errorf("failed to get TV details: %w", err)
 		}
 
-		if syoboiInfo.Season != nil && details.NumberOfSeasons < *syoboiInfo.Season {
+		var triedSeason int
+		if syoboiInfo.Season == nil {
+			triedSeason = 1
+			slog.Debug("No season info from Syoboi, trying season 1", "showID", show.ID)
+		} else {
+			triedSeason = *syoboiInfo.Season
+			slog.Debug("Trying season from Syoboi", "season", triedSeason, "showID", show.ID)
 
 		}
 
-		firstAirDate, err := time.Parse(time.DateOnly, show.FirstAirDate)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse first air date: %w", err)
+		var season tmdb.Season
+		for _, s := range details.Seasons {
+			if s.SeasonNumber == triedSeason {
+				season = s
+				break
+			}
+		}
+		if season != (tmdb.Season{}) {
+			episodeID, episodeNumber, episodeTitle, err := p.searchTmdbEpisode(show.ID, triedSeason, syoboiInfo)
+			if err == nil {
+				return createTmdbInfoFromSearchResult(show, season, episodeID, episodeNumber, episodeTitle)
+			}
+			if !errors.Is(err, ErrNotFound) {
+				return nil, fmt.Errorf("failed to search TMDB episode: %w", err)
+			}
+		} else {
+			slog.Debug("Season not found in TMDB details", "seasonNumber", triedSeason, "showID", show.ID)
 		}
 
 		for _, season := range details.Seasons {
 			// Skip specials
 			if season.SeasonNumber == 0 {
+				slog.Debug("Skipping special season", "showID", show.ID, "seasonName", season.Name)
+				continue
+			}
+
+			if season.SeasonNumber == triedSeason {
+				slog.Debug("Already tried this season, skipping", "showID", show.ID, "seasonNumber", season.SeasonNumber)
 				continue
 			}
 
 			episodeID, episodeNumber, episodeTitle, err := p.searchTmdbEpisode(show.ID, season.SeasonNumber, syoboiInfo)
 			if err == nil {
-				return &tmdbInfo{
-					ShowID:           show.ID,
-					ShowName:         show.Name,
-					ShowFirstAirDate: firstAirDate,
-					SeasonID:         season.ID,
-					SeasonNumber:     season.SeasonNumber,
-					EpisodeID:        episodeID,
-					EpisodeNumber:    episodeNumber,
-					EpisodeTitle:     episodeTitle,
-				}, nil
+				return createTmdbInfoFromSearchResult(show, season, episodeID, episodeNumber, episodeTitle)
 			}
 			if !errors.Is(err, ErrNotFound) {
 				return nil, fmt.Errorf("failed to search TMDB episode: %w", err)
@@ -97,6 +115,24 @@ func (p *processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 	}
 
 	return nil, ErrNotFound
+}
+
+func createTmdbInfoFromSearchResult(show tmdb.TVShowResult, season tmdb.Season, episodeID int64, episodeNumber int, episodeTitle string) (*tmdbInfo, error) {
+	firstAirDate, err := time.Parse(time.DateOnly, show.FirstAirDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse first air date: %w", err)
+	}
+
+	return &tmdbInfo{
+		ShowID:           show.ID,
+		ShowName:         show.Name,
+		ShowFirstAirDate: firstAirDate,
+		SeasonID:         season.ID,
+		SeasonNumber:     season.SeasonNumber,
+		EpisodeID:        episodeID,
+		EpisodeNumber:    episodeNumber,
+		EpisodeTitle:     episodeTitle,
+	}, nil
 }
 
 func (p *processor) searchTmdbEpisode(showID int64, seasonNumber int, syoboiInfo syoboiInfo) (int64, int, string, error) {

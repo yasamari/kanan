@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 
@@ -17,24 +16,36 @@ import (
 func main() {
 	cmd := &cli.Command{
 		Name:  "kanan",
-		Usage: "録画したtsファイルを整理するCLIツール",
+		Usage: "Organize recorded TV files based on Syoboi calendar and TMDB information",
 		Arguments: []cli.Argument{
 			&cli.StringArg{
-				Name:      "tspath",
-				UsageText: "対象のファイルパス",
+				Name:      "filepath",
+				UsageText: "Path to the recorded TV file",
+				Value:     "",
 			},
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Name:    "rootdir",
+				Usage:   "Path to the root directory after organization",
+				Aliases: []string{"r"},
+				Value:   "",
+			},
+			&cli.BoolFlag{
+				Name:    "dryrun",
+				Usage:   "Display processing without executing file operations",
+				Aliases: []string{"d"},
+				Value:   false,
+			},
+			&cli.StringFlag{
 				Name:    "apikey",
-				Aliases: []string{"a"},
-				Usage:   "TMDB APIキー",
+				Usage:   "TMDB API key (can also be set via TMDB_API_KEY environment variable)",
 				Sources: cli.EnvVars("TMDB_API_KEY"),
 			},
 			&cli.BoolFlag{
 				Name:    "verbose",
 				Aliases: []string{"v"},
-				Usage:   "詳細な出力を表示",
+				Usage:   "Display detailed output for debugging",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -46,6 +57,10 @@ func main() {
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 			slog.SetDefault(logger)
 
+			if cmd.StringArg("filepath") == "" {
+				return fmt.Errorf("filepath argument is required")
+			}
+
 			syoboiClient := syoboi.NewClient()
 			tmdbClient, err := tmdb.Init(cmd.String("apikey"))
 			if err != nil {
@@ -53,9 +68,10 @@ func main() {
 			}
 			infoExtractor := record.NewTsInfoExtractor()
 
-			err = processor.New(syoboiClient, tmdbClient, infoExtractor).Process(cmd.StringArg("tspath"))
-			if err != nil {
-				return err
+			processor := processor.New(syoboiClient, tmdbClient, infoExtractor)
+
+			if err := processor.Process(cmd.StringArg("filepath"), cmd.String("rootdir"), cmd.Bool("dryrun")); err != nil {
+				return fmt.Errorf("failed to process file: %w", err)
 			}
 
 			return nil
@@ -63,6 +79,7 @@ func main() {
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
