@@ -124,6 +124,10 @@ func (c *client) SearchProgramsByChannelAndTime(channelID int, startTime, endTim
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch programs: %d", resp.StatusCode)
+	}
+
 	var progLookupResponse struct {
 		XMLName   xml.Name  `xml:"ProgLookupResponse"`
 		ProgItems []Program `xml:"ProgItems>ProgItem"`
@@ -151,6 +155,9 @@ func (c *client) GetTitleByID(titleID int64) (*Title, error) {
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch title: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch title: %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
@@ -184,6 +191,9 @@ func (c *client) GetChannels() ([]Channel, error) {
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch channels: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch channels: %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
