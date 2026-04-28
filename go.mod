@@ -3,6 +3,7 @@ module github.com/yasamari/kanan
 go 1.26.1
 
 require (
+	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/cyruzin/golang-tmdb v1.9.2 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/koorimizuw/B24Decoder v0.3.0 // indirect

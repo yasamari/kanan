@@ -11,7 +11,7 @@ import (
 	"github.com/yasamari/kanan/internal/syoboi"
 )
 
-type SyoboiProgram struct {
+type syoboiInfo struct {
 	ID        int
 	TitleID   int
 	ChannelID int
@@ -21,27 +21,29 @@ type SyoboiProgram struct {
 	Episode   int
 }
 
-func (p *Processor) getProgramFromSyoboi(info record.Info) (*SyoboiProgram, error) {
+func (p *Processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, error) {
+	prog := syoboiInfo{}
+
 	channelID, err := saya.GetSyoboiChannelIDByServiceID(info.ServiceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Syoboi channel ID: %w", err)
+		return prog, fmt.Errorf("failed to get Syoboi channel ID: %w", err)
 	}
 
 	// 240000だと404になるため、常にdurationから1秒引いて検索する
 	endTime := info.StartTime.Add(info.Duration - time.Second)
 	programs, err := p.syoboiClient.SearchProgramsByChannelAndTime(channelID, info.StartTime, endTime)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search programs: %w", err)
+		return prog, fmt.Errorf("failed to search programs: %w", err)
 	}
 
 	program, err := filterSyoboiPrograms(programs, info)
 	if err != nil {
-		return nil, fmt.Errorf("failed to filter programs: %w", err)
+		return prog, fmt.Errorf("failed to filter programs: %w", err)
 	}
 
 	programTitle, err := p.syoboiClient.GetTitleByID(int64(program.TitleID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get title: %w", err)
+		return prog, fmt.Errorf("failed to get title: %w", err)
 	}
 	title := programTitle.Title
 
@@ -52,15 +54,15 @@ func (p *Processor) getProgramFromSyoboi(info record.Info) (*SyoboiProgram, erro
 
 	season, title := cutSeasonFromSyoboiTitle(title)
 
-	return &SyoboiProgram{
-		ID:        program.ID,
-		TitleID:   program.TitleID,
-		ChannelID: channelID,
-		Title:     title,
-		SubTitle:  program.STSubTitle,
-		Episode:   program.Count,
-		Season:    season,
-	}, nil
+	prog.ID = program.ID
+	prog.TitleID = program.TitleID
+	prog.ChannelID = channelID
+	prog.Title = title
+	prog.SubTitle = program.STSubTitle
+	prog.Episode = program.Count
+	prog.Season = season
+
+	return prog, nil
 }
 
 const stTimeFormat = "2006-01-02 15:04:05"

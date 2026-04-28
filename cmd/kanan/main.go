@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"os"
 
+	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/urfave/cli/v3"
 	"github.com/yasamari/kanan/internal/processor"
 	"github.com/yasamari/kanan/internal/record"
@@ -21,11 +24,36 @@ func main() {
 				UsageText: "対象のファイルパス",
 			},
 		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "apikey",
+				Aliases: []string{"a"},
+				Usage:   "TMDB APIキー",
+				Sources: cli.EnvVars("TMDB_API_KEY"),
+			},
+			&cli.BoolFlag{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "詳細な出力を表示",
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			logLevel := slog.LevelInfo
+			if cmd.Bool("verbose") {
+				logLevel = slog.LevelDebug
+			}
+
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+			slog.SetDefault(logger)
+
 			syoboiClient := syoboi.NewClient()
+			tmdbClient, err := tmdb.Init(cmd.String("apikey"))
+			if err != nil {
+				return fmt.Errorf("failed to initialize TMDB client: %w", err)
+			}
 			infoExtractor := record.NewTsInfoExtractor()
 
-			err := processor.New(syoboiClient, infoExtractor).Process(cmd.StringArg("tspath"))
+			err = processor.New(syoboiClient, tmdbClient, infoExtractor).Process(cmd.StringArg("tspath"))
 			if err != nil {
 				return err
 			}
