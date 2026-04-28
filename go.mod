@@ -10,5 +10,3 @@ require (
 	github.com/urfave/cli/v3 v3.8.0 // indirect
 	golang.org/x/text v0.3.5 // indirect
 )
-
-replace github.com/koorimizuw/aribtool => ./aribtool
