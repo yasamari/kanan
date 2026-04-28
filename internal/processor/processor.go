@@ -9,14 +9,14 @@ import (
 	"github.com/yasamari/kanan/internal/syoboi"
 )
 
-type Processor struct {
+type processor struct {
 	syoboiClient  syoboi.Client
 	tmdbClient    *tmdb.Client
 	infoExtractor record.InfoExtractor
 }
 
-func New(syoboiClient syoboi.Client, tmdbClient *tmdb.Client, infoExtractor record.InfoExtractor) *Processor {
-	return &Processor{
+func New(syoboiClient syoboi.Client, tmdbClient *tmdb.Client, infoExtractor record.InfoExtractor) *processor {
+	return &processor{
 		syoboiClient:  syoboiClient,
 		tmdbClient:    tmdbClient,
 		infoExtractor: infoExtractor,
@@ -29,7 +29,7 @@ const (
 	episodeFileFormat = "%s S%02dE%02d [syobocalid-%d].%s"
 )
 
-func (p *Processor) Process(path string) error {
+func (p *processor) Process(path string) error {
 	recordFileInfo, err := p.infoExtractor.Extract(path)
 	if err != nil {
 		return fmt.Errorf("failed to extract broadcast info: %w", err)

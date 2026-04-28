@@ -21,7 +21,7 @@ type syoboiInfo struct {
 	Episode   int
 }
 
-func (p *Processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, error) {
+func (p *processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, error) {
 	prog := syoboiInfo{}
 
 	channelID, err := saya.GetSyoboiChannelIDByServiceID(info.ServiceID)

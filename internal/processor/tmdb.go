@@ -35,7 +35,7 @@ type tmdbInfo struct {
 	EpisodeTitle     string
 }
 
-func (p *Processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
+func (p *processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 	shows, err := p.tmdbClient.GetSearchTVShow(syoboiInfo.Title, urlOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search TV show: %w", err)
@@ -99,7 +99,7 @@ func (p *Processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 	return nil, ErrNotFound
 }
 
-func (p *Processor) searchTmdbEpisode(showID int64, seasonNumber int, syoboiInfo syoboiInfo) (int64, int, string, error) {
+func (p *processor) searchTmdbEpisode(showID int64, seasonNumber int, syoboiInfo syoboiInfo) (int64, int, string, error) {
 	slog.Debug("Searching TMDB episode", "showID", showID, "seasonNumber", seasonNumber)
 
 	detail, err := p.tmdbClient.GetTVSeasonDetails(int(showID), seasonNumber, urlOptions)
