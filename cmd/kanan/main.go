@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -119,7 +120,7 @@ func main() {
 
 				entryPath := filepath.Join(path, entry.Name())
 				if err := proc.Process(entryPath, rootDir, cmd.Bool("dryrun")); err != nil {
-					if err == processor.ErrNotFound {
+					if errors.Is(err, processor.ErrNotFound) {
 						fmt.Printf("Info not found for file: %s\n", entryPath)
 						continue
 					}
