@@ -59,33 +59,49 @@ func (p *processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 			return nil, fmt.Errorf("failed to get TV details: %w", err)
 		}
 
-		var triedSeason int
-		if syoboiInfo.Season == nil {
-			triedSeason = 1
-			slog.Debug("No season info from Syoboi, trying season 1", "showID", show.ID)
-		} else {
-			triedSeason = *syoboiInfo.Season
-			slog.Debug("Trying season from Syoboi", "season", triedSeason, "showID", show.ID)
-
+		if len(details.Seasons) == 0 {
+			slog.Debug("No seasons found for show, skipping", "showID", show.ID)
+			continue
 		}
 
-		var season tmdb.Season
-		for _, s := range details.Seasons {
-			if s.SeasonNumber == triedSeason {
-				season = s
-				break
+		var (
+			airDateCloseSeason     *tmdb.Season
+			airDateCloseSeasonDiff time.Duration
+		)
+
+		if !syoboiInfo.Rebroadcast {
+			for _, season := range details.Seasons {
+				if season.SeasonNumber == 0 {
+					continue
+				}
+
+				seasonAirDate, err := time.Parse(time.DateOnly, season.AirDate)
+				if err != nil && len(season.AirDate) == 4 {
+					seasonAirDate, err = time.Parse("2006", season.AirDate)
+					if err != nil {
+						slog.Debug("Failed to parse season air date, skipping", "showID", show.ID, "seasonNumber", season.SeasonNumber, "airDate", season.AirDate)
+						continue
+					}
+				}
+
+				diff := seasonAirDate.Sub(syoboiInfo.StartTime).Abs()
+
+				if airDateCloseSeason == nil || diff < airDateCloseSeasonDiff {
+					airDateCloseSeason = &season
+					airDateCloseSeasonDiff = diff
+				}
 			}
 		}
-		if season != (tmdb.Season{}) {
-			episodeID, episodeNumber, episodeTitle, err := p.searchTmdbEpisode(show.ID, triedSeason, syoboiInfo)
+
+		if airDateCloseSeason != nil {
+			episodeID, episodeNumber, episodeTitle, err := p.searchTmdbEpisode(show.ID, airDateCloseSeason.SeasonNumber, syoboiInfo)
 			if err == nil {
-				return createTmdbInfoFromSearchResult(show, season, episodeID, episodeNumber, episodeTitle)
+				slog.Debug("Found episode in air date close season", "showID", show.ID, "seasonNumber", airDateCloseSeason.SeasonNumber, "episodeNumber", episodeNumber)
+				return createTmdbInfoFromSearchResult(show, *airDateCloseSeason, episodeID, episodeNumber, episodeTitle)
 			}
 			if !errors.Is(err, ErrNotFound) {
 				return nil, fmt.Errorf("failed to search TMDB episode: %w", err)
 			}
-		} else {
-			slog.Debug("Season not found in TMDB details", "seasonNumber", triedSeason, "showID", show.ID)
 		}
 
 		for _, season := range details.Seasons {
@@ -95,7 +111,7 @@ func (p *processor) getTmdbInfo(syoboiInfo syoboiInfo) (*tmdbInfo, error) {
 				continue
 			}
 
-			if season.SeasonNumber == triedSeason {
+			if airDateCloseSeason != nil && season.SeasonNumber == airDateCloseSeason.SeasonNumber {
 				slog.Debug("Already tried this season, skipping", "showID", show.ID, "seasonNumber", season.SeasonNumber)
 				continue
 			}
