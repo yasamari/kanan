@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/urfave/cli/v3"
@@ -13,6 +14,8 @@ import (
 	"github.com/yasamari/kanan/internal/record"
 	"github.com/yasamari/kanan/internal/syoboi"
 )
+
+var tsExtensions = []string{".ts", ".m2ts", ".mts"}
 
 func main() {
 	cmd := &cli.Command{
@@ -97,6 +100,10 @@ func main() {
 
 			for _, entry := range entries {
 				if entry.IsDir() {
+					continue
+				}
+
+				if !slices.Contains(tsExtensions, filepath.Ext(entry.Name())) {
 					continue
 				}
 
