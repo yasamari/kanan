@@ -82,6 +82,11 @@ func filterSyoboiPrograms(programs []syoboi.Program, info record.Info) (*syoboi.
 	loc, _ := time.LoadLocation("Asia/Tokyo")
 
 	for _, p := range programs {
+		if p.Deleted != 0 {
+			slog.Debug("Skipping deleted program", "programID", p.ID)
+			continue
+		}
+
 		startTime, err := time.ParseInLocation(stTimeFormat, p.StartTime, loc)
 		if err != nil {
 			continue
