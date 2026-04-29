@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/yasamari/kanan/internal/processor"
 	"github.com/yasamari/kanan/internal/record"
 	"github.com/yasamari/kanan/internal/syoboi"
+	"github.com/yasamari/kanan/internal/util"
 )
 
 var tsExtensions = []string{".ts", ".m2ts", ".mts"}
@@ -69,13 +71,18 @@ func main() {
 				return fmt.Errorf("rootdir argument is required")
 			}
 
-			syoboiClient := syoboi.NewClient()
+			httpClient := http.Client{
+				Transport: &util.CacheTransport{},
+			}
+
+			syoboiClient := syoboi.NewClient(httpClient)
 
 			tmdbClient, err := tmdb.Init(cmd.String("apikey"))
 			if err != nil {
 				return fmt.Errorf("failed to initialize TMDB client: %w", err)
 			}
 			tmdbClient.SetClientAutoRetry()
+			tmdbClient.SetClientConfig(httpClient)
 
 			infoExtractor := record.NewTsInfoExtractor()
 

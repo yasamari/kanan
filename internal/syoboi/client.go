@@ -74,14 +74,14 @@ const (
 )
 
 type client struct {
-	client *http.Client
+	client http.Client
 }
 
 var _ Client = (*client)(nil)
 
-func NewClient() *client {
+func NewClient(httpClient http.Client) *client {
 	return &client{
-		client: &http.Client{},
+		client: httpClient,
 	}
 }
 
