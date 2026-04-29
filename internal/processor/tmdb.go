@@ -146,7 +146,21 @@ func (p *processor) searchTmdbEpisode(showID int64, seasonNumber int, syoboiInfo
 	topEpisode := detail.Episodes[0]
 	var maxSimilarity float64
 
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("failed to load location: %w", err)
+	}
+
 	for _, episode := range detail.Episodes {
+		airDate, err := time.ParseInLocation(time.DateOnly, episode.AirDate, loc)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("failed to parse air date: %w", err)
+		}
+
+		if !syoboiInfo.Rebroadcast && syoboiInfo.StartTime.Before(airDate) {
+			continue
+		}
+
 		similarity := util.Similarity(syoboiInfo.SubTitle, episode.Name)
 		if similarity > maxSimilarity {
 			maxSimilarity = similarity

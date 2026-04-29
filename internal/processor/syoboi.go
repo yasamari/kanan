@@ -13,13 +13,15 @@ import (
 )
 
 type syoboiInfo struct {
-	ID        int
-	TitleID   int
-	ChannelID int
-	Title     string
-	SubTitle  string
-	Season    *int
-	Episode   int
+	ID          int
+	TitleID     int
+	ChannelID   int
+	Title       string
+	SubTitle    string
+	Season      *int
+	Episode     int
+	Rebroadcast bool
+	StartTime   time.Time
 }
 
 func (p *processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, error) {
@@ -70,6 +72,10 @@ func (p *processor) getProgramInfoFromSyoboi(info record.Info) (syoboiInfo, erro
 	prog.SubTitle = program.STSubTitle
 	prog.Episode = program.Count
 	prog.Season = season
+	// 8: 再放送
+	// 10: 新 再放送
+	prog.Rebroadcast = program.Flag == 8 || program.Flag == 10
+	prog.StartTime = info.StartTime
 
 	return prog, nil
 }
