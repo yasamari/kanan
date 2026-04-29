@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"github.com/yasamari/kanan/internal/record"
 	"github.com/yasamari/kanan/internal/syoboi"
 )
+
+var ErrNotFound = errors.New("not found")
 
 type processor struct {
 	syoboiClient  syoboi.Client

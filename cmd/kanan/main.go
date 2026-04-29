@@ -86,7 +86,7 @@ func main() {
 
 			infoExtractor := record.NewTsInfoExtractor()
 
-			processor := processor.New(syoboiClient, tmdbClient, infoExtractor)
+			proc := processor.New(syoboiClient, tmdbClient, infoExtractor)
 
 			isDir := false
 
@@ -97,7 +97,7 @@ func main() {
 			}
 
 			if !isDir {
-				if err := processor.Process(path, rootDir, cmd.Bool("dryrun")); err != nil {
+				if err := proc.Process(path, rootDir, cmd.Bool("dryrun")); err != nil {
 					return fmt.Errorf("failed to process file: %w", err)
 				}
 				return nil
@@ -118,7 +118,11 @@ func main() {
 				}
 
 				entryPath := filepath.Join(path, entry.Name())
-				if err := processor.Process(entryPath, rootDir, cmd.Bool("dryrun")); err != nil {
+				if err := proc.Process(entryPath, rootDir, cmd.Bool("dryrun")); err != nil {
+					if err == processor.ErrNotFound {
+						fmt.Printf("Info not found for file: %s\n", entryPath)
+						continue
+					}
 					slog.Error("Failed to process file", "path", entryPath, "error", err)
 				}
 			}

@@ -104,7 +104,7 @@ func filterSyoboiPrograms(programs []syoboi.Program, info record.Info) (*syoboi.
 		slog.Debug("Program time did not match", "programID", p.ID, "startTime", startTime, "endTime", endTime)
 	}
 	if len(filtered) == 0 || len(filtered) > 1 {
-		return nil, fmt.Errorf("program not found")
+		return nil, ErrNotFound
 	}
 	return &filtered[0], nil
 }

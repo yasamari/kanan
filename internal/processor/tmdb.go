@@ -10,13 +10,9 @@ import (
 	"github.com/yasamari/kanan/internal/util"
 )
 
-var (
-	urlOptions = map[string]string{
-		"language": "ja-JP",
-	}
-
-	ErrNotFound = errors.New("not found")
-)
+var urlOptions = map[string]string{
+	"language": "ja-JP",
+}
 
 const (
 	showTitleSimilarityThreshold    = 0.4
