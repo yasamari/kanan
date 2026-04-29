@@ -70,10 +70,13 @@ func main() {
 			}
 
 			syoboiClient := syoboi.NewClient()
+
 			tmdbClient, err := tmdb.Init(cmd.String("apikey"))
 			if err != nil {
 				return fmt.Errorf("failed to initialize TMDB client: %w", err)
 			}
+			tmdbClient.SetClientAutoRetry()
+
 			infoExtractor := record.NewTsInfoExtractor()
 
 			processor := processor.New(syoboiClient, tmdbClient, infoExtractor)
