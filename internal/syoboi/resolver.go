@@ -31,10 +31,17 @@ type ProgramWithRecordInfo struct {
 
 const syoboiTimeFormat = "2006-01-02 15:04:05"
 
+type matchKey struct {
+	channelID int
+	start     int64
+	end       int64
+}
+
 func (r *resolver) Resolve(recordInfos []record.Info, earliest, latest time.Time) (map[Title][]ProgramWithRecordInfo, error) {
-	channelIDs := infosToChannelIDs(recordInfos, r.serviceIDToChannelID)
 	searchEarliest := earliest
-	searchInfos := recordInfos
+
+	infoMap := r.createInfoMap(recordInfos)
+	channelIDs := infoMapToChannelIDs(infoMap, r.serviceIDToChannelID)
 
 	titleIDsMap := make(map[int]struct{})
 	var programWithRecordInfos []ProgramWithRecordInfo
@@ -47,75 +54,110 @@ func (r *resolver) Resolve(recordInfos []record.Info, earliest, latest time.Time
 			return nil, fmt.Errorf("failed to search programs: %w", err)
 		}
 
-		slog.Debug("Found programs", "count", len(programs))
-
-		time.Sleep(1 * time.Second)
-
-		for _, prog := range programs {
-			if prog.Deleted != 0 {
-				continue
-			}
-
-			endTime, err := time.ParseInLocation(syoboiTimeFormat, prog.EndTime, loc)
-			if err != nil {
-				slog.Error("Failed to parse end time", "endTime", prog.EndTime, "error", err)
-				continue
-			}
-			if endTime.After(searchEarliest) {
-				searchEarliest = endTime
-			}
-			startTime, err := time.ParseInLocation(syoboiTimeFormat, prog.StartTime, loc)
-			if err != nil {
-				slog.Error("Failed to parse start time", "startTime", prog.StartTime, "error", err)
-				continue
-			}
-
-			for _, info := range searchInfos {
-				// チャンネルID、開始時間、終了時間が一致するものをマッチとする
-				channelID, ok := r.serviceIDToChannelID[info.ServiceID]
-				if !ok {
-					slog.Debug("No channel ID found for service ID, skipping", "serviceID", info.ServiceID)
-					continue
-				}
-
-				if channelID == prog.ChannelID &&
-					startTime.Equal(info.BroadcastStartTime) &&
-					endTime.Equal(info.BroadcastStartTime.Add(info.BroadcastDuration)) {
-					programWithRecordInfos = append(programWithRecordInfos, ProgramWithRecordInfo{
-						Program:    prog,
-						RecordInfo: info,
-					})
-
-					titleIDsMap[prog.TitleID] = struct{}{}
-
-					break
-				}
-			}
-		}
-
-		var filteredInfos []record.Info
-		for _, info := range searchInfos {
-			if info.BroadcastStartTime.After(searchEarliest) {
-				filteredInfos = append(filteredInfos, info)
-			}
-		}
-		searchInfos = filteredInfos
-		channelIDs = infosToChannelIDs(searchInfos, r.serviceIDToChannelID)
-
-		slog.Debug("Finished processing programs, updating search infos", "remainingSearchInfos", len(searchInfos))
-
 		if len(programs) == 0 {
 			slog.Debug("No more programs found, finishing resolution")
 			break
 		}
 
-		if len(searchInfos) == 0 {
+		slog.Debug("Found programs", "count", len(programs))
+
+		matched := r.matchPrograms(programs, titleIDsMap, infoMap)
+		programWithRecordInfos = append(programWithRecordInfos, matched...)
+
+		slog.Debug("Finished processing programs, updating search infos", "remainingSearchInfos", len(infoMap))
+
+		endTime, err := time.ParseInLocation(syoboiTimeFormat, programs[len(programs)-1].EndTime, loc)
+		if err != nil {
+			slog.Error("Failed to parse end time of last program", "endTime", programs[len(programs)-1].EndTime, "error", err)
+			break
+		}
+		if endTime.After(searchEarliest) {
+			searchEarliest = endTime
+		}
+
+		for k := range infoMap {
+			if k.end <= searchEarliest.Unix() {
+				delete(infoMap, k)
+			}
+		}
+
+		if len(infoMap) == 0 {
 			slog.Debug("No more search infos remaining, finishing resolution")
 			break
 		}
+
+		channelIDs = infoMapToChannelIDs(infoMap, r.serviceIDToChannelID)
 	}
 
-	var titleIDs []int
+	return r.groupByTitle(programWithRecordInfos, titleIDsMap), nil
+}
+
+func (r *resolver) matchPrograms(programs []Program, titleIDsMap map[int]struct{}, infoMap map[matchKey]record.Info) []ProgramWithRecordInfo {
+	loc, _ := time.LoadLocation("Asia/Tokyo")
+
+	var matched []ProgramWithRecordInfo
+	for _, prog := range programs {
+		if prog.Deleted != 0 {
+			continue
+		}
+
+		endTime, err := time.ParseInLocation(syoboiTimeFormat, prog.EndTime, loc)
+		if err != nil {
+			slog.Error("Failed to parse end time", "endTime", prog.EndTime, "error", err)
+			continue
+		}
+
+		startTime, err := time.ParseInLocation(syoboiTimeFormat, prog.StartTime, loc)
+		if err != nil {
+			slog.Error("Failed to parse start time", "startTime", prog.StartTime, "error", err)
+			continue
+		}
+
+		k := matchKey{
+			channelID: prog.ChannelID,
+			start:     startTime.Unix(),
+			end:       endTime.Unix(),
+		}
+
+		if info, ok := infoMap[k]; ok {
+			matched = append(matched, ProgramWithRecordInfo{
+				Program:    prog,
+				RecordInfo: info,
+			})
+
+			delete(infoMap, k)
+			titleIDsMap[prog.TitleID] = struct{}{}
+		}
+	}
+	return matched
+}
+
+func (r *resolver) createInfoMap(recordInfos []record.Info) map[matchKey]record.Info {
+	infoMap := make(map[matchKey]record.Info, len(recordInfos))
+
+	for _, info := range recordInfos {
+		channelID, ok := r.serviceIDToChannelID[info.ServiceID]
+		if !ok {
+			slog.Debug("No channel ID found for service ID, skipping", "serviceID", info.ServiceID)
+			continue
+		}
+
+		start := info.BroadcastStartTime
+		end := info.BroadcastStartTime.Add(info.BroadcastDuration)
+
+		k := matchKey{
+			channelID: channelID,
+			start:     start.Unix(),
+			end:       end.Unix(),
+		}
+
+		infoMap[k] = info
+	}
+	return infoMap
+}
+
+func (r *resolver) groupByTitle(programs []ProgramWithRecordInfo, titleIDsMap map[int]struct{}) map[Title][]ProgramWithRecordInfo {
+	titleIDs := make([]int, 0, len(titleIDsMap))
 	for titleID := range titleIDsMap {
 		titleIDs = append(titleIDs, titleID)
 	}
@@ -123,7 +165,8 @@ func (r *resolver) Resolve(recordInfos []record.Info, earliest, latest time.Time
 	slog.Debug("Fetching titles for matched programs", "titleIDs", titleIDs)
 	titles, err := r.client.GetTitleByIDs(titleIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get titles: %w", err)
+		slog.Error("Failed to get titles", "error", err)
+		return nil
 	}
 	titleIDToTitle := make(map[int]Title)
 	for _, title := range titles {
@@ -131,8 +174,7 @@ func (r *resolver) Resolve(recordInfos []record.Info, earliest, latest time.Time
 	}
 
 	result := make(map[Title][]ProgramWithRecordInfo)
-
-	for _, p := range programWithRecordInfos {
+	for _, p := range programs {
 		title, ok := titleIDToTitle[p.Program.TitleID]
 		if !ok {
 			slog.Debug("No title found for title ID, skipping", "titleID", p.Program.TitleID)
@@ -140,12 +182,12 @@ func (r *resolver) Resolve(recordInfos []record.Info, earliest, latest time.Time
 		}
 		result[title] = append(result[title], p)
 	}
-	return result, nil
+	return result
 }
 
-func infosToChannelIDs(infos []record.Info, serviceIDToChannelID map[int]int) []int {
+func infoMapToChannelIDs(infoMap map[matchKey]record.Info, serviceIDToChannelID map[int]int) []int {
 	channelIDsMap := make(map[int]struct{})
-	for _, info := range infos {
+	for _, info := range infoMap {
 		channelID, ok := serviceIDToChannelID[info.ServiceID]
 		if !ok {
 			slog.Debug("No channel ID found for service ID, skipping", "serviceID", info.ServiceID)
