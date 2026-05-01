@@ -19,6 +19,9 @@ func (e *tsExtractor) Extract(path string) (Info, error) {
 	patPid := tsparser.PidMap[tsparser.ProgramAssociationSection]
 	patTidRange := tsparser.TableIdMap[tsparser.ProgramAssociationSection]
 	patSectionList := tsparser.Scan(path, patPid, patTidRange, 100)
+	if len(patSectionList) == 0 {
+		return Info{}, fmt.Errorf("PAT section not found")
+	}
 	sid := tsparser.GetSid(patSectionList[0])
 
 	eventPid := tsparser.PidMap[tsparser.CurrentEventSection]
