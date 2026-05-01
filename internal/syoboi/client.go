@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,17 +25,6 @@ type Program struct {
 	Warn        int    `xml:"Warn"`
 	ChannelID   int    `xml:"ChID"`
 	Revision    int    `xml:"Revision"`
-}
-
-type Channel struct {
-	ID       int    `xml:"ChID"`
-	Name     string `xml:"ChName"`
-	IEPGName string `xml:"ChiEPGName"`
-	URL      string `xml:"ChURL"`
-	EPGURL   string `xml:"ChEPGURL"`
-	Comment  string `xml:"ChComment"`
-	GroupID  int    `xml:"ChGID"`
-	Number   int    `xml:"ChNumber"`
 }
 
 type Title struct {
@@ -63,9 +53,8 @@ type Title struct {
 }
 
 type Client interface {
-	SearchProgramsByChannelAndTime(channelID int, startTime, endTime time.Time) ([]Program, error)
-	GetTitleByID(titleID int64) (*Title, error)
-	GetChannels() ([]Channel, error)
+	SearchProgramsByChannelAndTime(channelIDs []int, startTime, endTime time.Time) ([]Program, error)
+	GetTitleByIDs(ids []int) ([]Title, error)
 }
 
 const (
@@ -101,15 +90,20 @@ func createRequest(url string) (*http.Request, error) {
 	return req, nil
 }
 
-func (c *client) SearchProgramsByChannelAndTime(channelID int, startTime, endTime time.Time) ([]Program, error) {
+func (c *client) SearchProgramsByChannelAndTime(channelIDs []int, startTime, endTime time.Time) ([]Program, error) {
 	// 20260102_000000-20261002_235959
 	stTime := fmt.Sprintf("%s-%s", startTime.Format(stTimeFormat), endTime.Format(stTimeFormat))
+
+	strChannelIDs := make([]string, len(channelIDs))
+	for i, id := range channelIDs {
+		strChannelIDs[i] = strconv.Itoa(id)
+	}
 
 	u, _ := url.Parse(baseURL)
 	q := u.Query()
 	q.Add("Command", "ProgLookup")
 	q.Add("JOIN", "SubTitles")
-	q.Add("ChID", strconv.Itoa(channelID))
+	q.Add("ChID", strings.Join(strChannelIDs, ","))
 	q.Add("StTime", stTime)
 	u.RawQuery = q.Encode()
 
@@ -140,11 +134,16 @@ func (c *client) SearchProgramsByChannelAndTime(channelID int, startTime, endTim
 	return progLookupResponse.ProgItems, nil
 }
 
-func (c *client) GetTitleByID(titleID int64) (*Title, error) {
+func (c *client) GetTitleByIDs(ids []int) ([]Title, error) {
+	strIDs := make([]string, len(ids))
+	for i, id := range ids {
+		strIDs[i] = strconv.Itoa(id)
+	}
+
 	u, _ := url.Parse(baseURL)
 	q := u.Query()
 	q.Add("Command", "TitleLookup")
-	q.Add("TID", strconv.FormatInt(titleID, 10))
+	q.Add("TID", strings.Join(strIDs, ","))
 	u.RawQuery = q.Encode()
 
 	req, err := createRequest(u.String())
@@ -170,41 +169,5 @@ func (c *client) GetTitleByID(titleID int64) (*Title, error) {
 		return nil, fmt.Errorf("failed to decode title: %w", err)
 	}
 
-	if len(titleLookupResponse.TitleItems) == 0 {
-		return nil, nil
-	}
-
-	return &titleLookupResponse.TitleItems[0], nil
-}
-
-func (c *client) GetChannels() ([]Channel, error) {
-	u, _ := url.Parse(baseURL)
-	q := u.Query()
-	q.Add("Command", "ChLookup")
-	u.RawQuery = q.Encode()
-
-	req, err := createRequest(u.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch channels: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch channels: %d", resp.StatusCode)
-	}
-	defer resp.Body.Close()
-
-	var chLookupResponse struct {
-		XMLName xml.Name  `xml:"ChLookupResponse"`
-		ChItems []Channel `xml:"ChItems>ChItem"`
-		Result  Result    `xml:"Result"`
-	}
-	if err := xml.NewDecoder(resp.Body).Decode(&chLookupResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode channels: %w", err)
-	}
-
-	return chLookupResponse.ChItems, nil
+	return titleLookupResponse.TitleItems, nil
 }

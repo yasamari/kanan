@@ -19,10 +19,10 @@ const url = "https://github.com/SlashNephy/saya-definitions/raw/refs/heads/maste
 func fetchSayaDefinitions() ([]Channel, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch Saya definitions: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch Saya definitions: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
@@ -30,25 +30,24 @@ func fetchSayaDefinitions() ([]Channel, error) {
 		Channels []Channel `json:"channels"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode Saya definitions: %w", err)
 	}
 
 	return response.Channels, nil
 }
 
-func GetSyoboiChannelIDByServiceID(serviceID int) (int, error) {
+func GetServiceToChannelIDMap() (map[int]int, error) {
 	channels, err := fetchSayaDefinitions()
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch Saya definitions: %w", err)
+		return nil, fmt.Errorf("failed to fetch Saya definitions: %w", err)
 	}
 
+	serviceToChannelID := make(map[int]int)
 	for _, ch := range channels {
 		for _, sid := range ch.ServiceIDs {
-			if sid == serviceID {
-				return ch.SyobocalID, nil
-			}
+			serviceToChannelID[sid] = ch.SyobocalID
 		}
 	}
 
-	return 0, fmt.Errorf("channel not found for service ID: %d", serviceID)
+	return serviceToChannelID, nil
 }

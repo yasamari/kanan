@@ -32,8 +32,9 @@ func (e *tsExtractor) Extract(path string) (Info, error) {
 	event := events[len(events)-1]
 
 	return Info{
-		StartTime: event.StartTime,
-		Duration:  time.Duration(event.Duration) * time.Minute,
-		ServiceID: event.ServiceId,
+		Path:               path,
+		BroadcastStartTime: event.StartTime,
+		BroadcastDuration:  time.Duration(event.Duration) * time.Minute,
+		ServiceID:          event.ServiceId,
 	}, nil
 }

@@ -3,94 +3,158 @@ package processor
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
-	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/yasamari/kanan/internal/record"
 	"github.com/yasamari/kanan/internal/syoboi"
+	"github.com/yasamari/kanan/internal/tmdb"
 )
 
 var ErrNotFound = errors.New("not found")
 
 type processor struct {
-	syoboiClient  syoboi.Client
-	tmdbClient    *tmdb.Client
-	infoExtractor record.InfoExtractor
+	infoExtractor   record.InfoExtractor
+	episodeResolver tmdb.EpisodeResolver
+	syoboiResolver  syoboi.Resolver
 }
 
-func New(syoboiClient syoboi.Client, tmdbClient *tmdb.Client, infoExtractor record.InfoExtractor) *processor {
+func New(infoExtractor record.InfoExtractor, syoboiResolver syoboi.Resolver, episodeResolver tmdb.EpisodeResolver) *processor {
 	return &processor{
-		syoboiClient:  syoboiClient,
-		tmdbClient:    tmdbClient,
-		infoExtractor: infoExtractor,
+		syoboiResolver:  syoboiResolver,
+		infoExtractor:   infoExtractor,
+		episodeResolver: episodeResolver,
 	}
 }
 
 const (
-	seriesDirFormat   = "%s (%d) [tmdbid-%d]"
-	seasonDirFormat   = "Season %02d [syobocalid-%d]"
-	episodeFileFormat = "%s S%02dE%02d [syobocalid-%d]%s"
+	createNewChunksThreshold = 24 * time.Hour * 30 // 1ヶ月以上離れているものは別のチャンクとして処理する
 )
 
-func (p *processor) Process(path string, rootDir string, dryRun bool) error {
-	fmt.Printf("Processing file: %s\n", path)
+type pathChunk struct {
+	Infos    []record.Info
+	Earliest time.Time
+	Latest   time.Time
+}
 
-	path, err := filepath.Abs(path)
+type ProcessResult struct {
+	Path                 string
+	SyoboiTitleID        int
+	SyoboiProgramID      int
+	EpisodeResolveResult tmdb.EpisodeResolveResult
+}
+
+func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool) ([]ProcessResult, error) {
+	slog.Info("Extracting info from files", "count", len(paths))
+	recordInfos, err := p.extractInfoAndFilterFiles(paths)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
+		return nil, fmt.Errorf("failed to extract info from files: %w", err)
 	}
+	slog.Info("Finished extracting info from files", "count", len(recordInfos))
 
-	recordFileInfo, err := p.infoExtractor.Extract(path)
+	pathChunks, err := p.createPathChunks(recordInfos)
 	if err != nil {
-		return fmt.Errorf("failed to extract broadcast info: %w", err)
+		return nil, fmt.Errorf("failed to create path chunks: %w", err)
 	}
-	fmt.Printf("Extracted info: ServiceID=%d, StartTime=%s, Duration=%s\n", recordFileInfo.ServiceID, recordFileInfo.StartTime.Format(time.DateTime), recordFileInfo.Duration)
+	slog.Info("Created file chunks", "chunkCount", len(pathChunks), "totalFiles", len(paths))
 
-	syoboiInfo, err := p.getProgramInfoFromSyoboi(recordFileInfo)
-	if err != nil {
-		return fmt.Errorf("failed to get program from Syoboi: %w", err)
-	}
-	fmt.Printf("Matched Syoboi calendar program: %s #%d %s\n", syoboiInfo.Title, syoboiInfo.Episode, syoboiInfo.SubTitle)
+	mergedSyoboiResults := make(map[syoboi.Title][]syoboi.ProgramWithRecordInfo)
 
-	tmdbInfo, err := p.getTmdbInfo(syoboiInfo)
-	if err != nil {
-		return fmt.Errorf("failed to get TMDB Info: %w", err)
-	}
-
-	fmt.Printf("Matched TMDB show: %s (Season %d) #%d %s\n", tmdbInfo.ShowName, tmdbInfo.SeasonNumber, tmdbInfo.EpisodeNumber, tmdbInfo.EpisodeTitle)
-
-	fileExt := filepath.Ext(path)
-
-	seriesDir := fmt.Sprintf(seriesDirFormat, tmdbInfo.ShowName, tmdbInfo.ShowFirstAirDate.Year(), tmdbInfo.ShowID)
-	seasonDir := fmt.Sprintf(seasonDirFormat, tmdbInfo.SeasonNumber, syoboiInfo.TitleID)
-	episodeFile := fmt.Sprintf(episodeFileFormat, tmdbInfo.EpisodeTitle, tmdbInfo.SeasonNumber, tmdbInfo.EpisodeNumber, syoboiInfo.ID, fileExt)
-
-	dirPath := filepath.Join(rootDir, seriesDir, seasonDir)
-
-	if !dryRun {
-		err = os.MkdirAll(dirPath, 0755)
+	for i, chunk := range pathChunks {
+		resolved, err := p.syoboiResolver.Resolve(chunk.Infos, chunk.Earliest, chunk.Latest)
 		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+			return nil, fmt.Errorf("failed to resolve syoboi programs: %w", err)
+		}
+		slog.Info("Finished resolving syoboi programs for chunk", "chunkIndex", i, "matchedPrograms", len(resolved))
+
+		for title, programs := range resolved {
+			mergedSyoboiResults[title] = append(mergedSyoboiResults[title], programs...)
 		}
 	}
 
-	symlinkPath := filepath.Join(dirPath, episodeFile)
+	programIDToEpisodeResolveResult := make(map[int]*tmdb.EpisodeResolveResult)
+	for title, programs := range mergedSyoboiResults {
+		searchTitle := title.Title
+		if title.ShortTitle != "" {
+			searchTitle = title.ShortTitle
+		}
+		season, searchTitle := cutSeasonFromSyoboiTitle(searchTitle)
 
-	_, err = os.Stat(symlinkPath)
-	if err == nil {
-		fmt.Printf("Symlink already exists: %s\n", symlinkPath)
-		return nil
+		isRebroadcast := programs[0].Program.Flag == 8 || programs[0].Program.Flag == 10
+
+		results, err := p.episodeResolver.Resolve(searchTitle, season, isRebroadcast, programs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve episodes: %w", err)
+		}
+		maps.Copy(programIDToEpisodeResolveResult, results)
 	}
 
-	if !dryRun {
-		err = os.Symlink(path, symlinkPath)
-		if err != nil {
-			return fmt.Errorf("failed to create symlink: %w", err)
+	var processResults []ProcessResult
+	for _, programs := range mergedSyoboiResults {
+		for _, program := range programs {
+			episodeResolveResult, ok := programIDToEpisodeResolveResult[program.ID]
+			if !ok {
+				slog.Warn("No episode resolve result found for program", "programID", program.ID, "title", program.STSubTitle)
+				continue
+			}
+
+			processResults = append(processResults, ProcessResult{
+				Path:                 program.RecordInfo.Path,
+				SyoboiTitleID:        program.TitleID,
+				SyoboiProgramID:      program.ID,
+				EpisodeResolveResult: *episodeResolveResult,
+			})
 		}
 	}
-	fmt.Printf("Created symlink: %s\n", symlinkPath)
 
-	return nil
+	return processResults, nil
+}
+
+func (p *processor) extractInfoAndFilterFiles(paths []string) ([]record.Info, error) {
+	var result []record.Info
+
+	for _, path := range paths {
+		info, err := p.infoExtractor.Extract(path)
+		if err != nil {
+			slog.Error("Failed to extract info for file", "path", path, "error", err)
+			continue
+		}
+		result = append(result, info)
+	}
+
+	return result, nil
+}
+
+func (p *processor) createPathChunks(recordInfos []record.Info) ([]pathChunk, error) {
+	slices.SortFunc(recordInfos, func(a, b record.Info) int {
+		return a.BroadcastStartTime.Compare(b.BroadcastStartTime)
+	})
+
+	var pathChunks []pathChunk
+	var currentChunkIndex int
+	for i, info := range recordInfos {
+		if i > 0 {
+			prevInfo := recordInfos[i-1]
+			if info.BroadcastStartTime.Sub(prevInfo.BroadcastStartTime) > createNewChunksThreshold {
+				currentChunkIndex++
+			}
+		}
+
+		if len(pathChunks) <= currentChunkIndex {
+			pathChunks = append(pathChunks, pathChunk{})
+		}
+
+		currentChunk := &pathChunks[currentChunkIndex]
+		currentChunk.Infos = append(currentChunk.Infos, info)
+		if currentChunk.Earliest.IsZero() || info.BroadcastStartTime.Before(currentChunk.Earliest) {
+			currentChunk.Earliest = info.BroadcastStartTime
+		}
+		endTime := info.BroadcastStartTime.Add(info.BroadcastDuration)
+		if currentChunk.Latest.IsZero() || endTime.After(currentChunk.Latest) {
+			currentChunk.Latest = endTime
+		}
+	}
+	return pathChunks, nil
 }
