@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	gotmdb "github.com/cyruzin/golang-tmdb"
@@ -98,6 +99,7 @@ func main() {
 			syoboiResolver := syoboi.NewResolver(syoboiClient, serviceToChannelID)
 
 			proc := processor.New(infoExtractor, syoboiResolver, episodeResolver)
+			reporter := newStatusReporter(os.Stdout)
 
 			isDir := false
 
@@ -108,11 +110,11 @@ func main() {
 			}
 
 			if !isDir {
-				result, err := proc.ProcessMultiple([]string{path}, rootDir, cmd.Bool("dryrun"))
+				result, err := proc.ProcessMultiple([]string{path}, rootDir, cmd.Bool("dryrun"), reporter)
 				if err != nil {
 					return fmt.Errorf("failed to process file: %w", err)
 				}
-				if err := createSymlinks(result, rootDir, cmd.Bool("dryrun")); err != nil {
+				if err := createSymlinks(result, rootDir, cmd.Bool("dryrun"), reporter); err != nil {
 					return fmt.Errorf("failed to create symlink: %w", err)
 				}
 				return nil
@@ -137,11 +139,11 @@ func main() {
 				paths = append(paths, entryPath)
 			}
 
-			result, err := proc.ProcessMultiple(paths, rootDir, cmd.Bool("dryrun"))
+			result, err := proc.ProcessMultiple(paths, rootDir, cmd.Bool("dryrun"), reporter)
 			if err != nil {
 				return fmt.Errorf("failed to process files: %w", err)
 			}
-			if err := createSymlinks(result, rootDir, cmd.Bool("dryrun")); err != nil {
+			if err := createSymlinks(result, rootDir, cmd.Bool("dryrun"), reporter); err != nil {
 				return fmt.Errorf("failed to create symlinks: %w", err)
 			}
 
@@ -161,37 +163,101 @@ const (
 	episodeFileFormat = "%s S%02dE%02d [syobocalid-%d]%s"
 )
 
-func createSymlinks(processResults []processor.ProcessResult, rootDir string, dryRun bool) error {
-	for _, result := range processResults {
+func createSymlinks(processResults []processor.ProcessResult, rootDir string, dryRun bool, reporter processor.ProgressReporter) error {
+	if reporter != nil {
+		reporter.Start("Creating symlinks", len(processResults))
+	}
+
+	var created []string
+	var failed []string
+
+	for i, result := range processResults {
 		resolveResult := result.EpisodeResolveResult
+		label := fmt.Sprintf("%s S%02dE%02d", resolveResult.ShowName, resolveResult.SeasonNumber, resolveResult.EpisodeNumber)
+		srcBase := filepath.Base(result.Path)
 
-		seriesDirName := fmt.Sprintf(seriesDirFormat, resolveResult.ShowName, resolveResult.FirstAirDate.Format("2006"), resolveResult.ShowID)
-		seasonDirName := fmt.Sprintf(seasonDirFormat, resolveResult.SeasonNumber, result.SyoboiTitleID)
-		episodeFileName := fmt.Sprintf(episodeFileFormat, resolveResult.EpisodeName, resolveResult.SeasonNumber, resolveResult.EpisodeNumber, result.SyoboiProgramID, filepath.Ext(result.Path))
-
-		targetDir := filepath.Join(rootDir, seriesDirName, seasonDirName)
-		targetPath := filepath.Join(targetDir, episodeFileName)
+		var detail string
 
 		if dryRun {
-			fmt.Printf("Would create symlink: %s -> %s\n", targetPath, result.Path)
-			continue
+			detail = fmt.Sprintf("would create %s -> %s", label, srcBase)
+			created = append(created, fmt.Sprintf("%s -> %s", label, srcBase))
+		} else {
+			seriesDirName := fmt.Sprintf(seriesDirFormat, resolveResult.ShowName, resolveResult.FirstAirDate.Format("2006"), resolveResult.ShowID)
+			seasonDirName := fmt.Sprintf(seasonDirFormat, resolveResult.SeasonNumber, result.SyoboiTitleID)
+			episodeFileName := fmt.Sprintf(episodeFileFormat, resolveResult.EpisodeName, resolveResult.SeasonNumber, resolveResult.EpisodeNumber, result.SyoboiProgramID, filepath.Ext(result.Path))
+
+			targetDir := filepath.Join(rootDir, seriesDirName, seasonDirName)
+			targetPath := filepath.Join(targetDir, episodeFileName)
+
+			if err := os.MkdirAll(targetDir, 0755); err != nil {
+				failed = append(failed, fmt.Sprintf("%s -> %s: mkdir failed: %v", label, srcBase, err))
+				detail = fmt.Sprintf("%s: mkdir failed", label)
+				if reporter != nil {
+					reporter.Update(i+1, len(processResults), detail)
+				}
+				continue
+			}
+
+			absPath, err := filepath.Abs(result.Path)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s -> %s: path error: %v", label, srcBase, err))
+				detail = fmt.Sprintf("%s: path error", label)
+				if reporter != nil {
+					reporter.Update(i+1, len(processResults), detail)
+				}
+				continue
+			}
+
+			if fi, err := os.Lstat(targetPath); err == nil {
+				// target exists
+				if fi.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(targetPath); err == nil && dest == absPath {
+						created = append(created, fmt.Sprintf("%s -> %s (exists)", label, srcBase))
+						detail = fmt.Sprintf("%s exists", label)
+					} else {
+						failed = append(failed, fmt.Sprintf("%s -> %s: exists and differs", label, srcBase))
+						detail = fmt.Sprintf("%s exists and differs", label)
+					}
+				} else {
+					failed = append(failed, fmt.Sprintf("%s -> %s: target exists and is not symlink", label, srcBase))
+					detail = fmt.Sprintf("%s exists (not symlink)", label)
+				}
+			} else if os.IsNotExist(err) {
+				if err := os.Symlink(absPath, targetPath); err != nil {
+					failed = append(failed, fmt.Sprintf("%s -> %s: symlink failed: %v", label, srcBase, err))
+					detail = fmt.Sprintf("%s: symlink failed", label)
+				} else {
+					created = append(created, fmt.Sprintf("%s -> %s", label, srcBase))
+					detail = fmt.Sprintf("%s created", label)
+				}
+			} else {
+				failed = append(failed, fmt.Sprintf("%s -> %s: stat failed: %v", label, srcBase, err))
+				detail = fmt.Sprintf("%s: stat failed", label)
+			}
 		}
 
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", targetDir, err)
+		if reporter != nil {
+			reporter.Update(i+1, len(processResults), detail)
 		}
+	}
 
-		if _, err := os.Stat(targetPath); err == nil {
-			fmt.Printf("Symlink already exists: %s\n", targetPath)
-			continue
+	summary := fmt.Sprintf("Symlink creation finished: %d created, %d failed", len(created), len(failed))
+	if reporter != nil {
+		reporter.Done(summary)
+		if len(created) > 0 {
+			reporter.Message("Created:\n" + strings.Join(created, "\n"))
+		} else {
+			reporter.Message("Created: (none)")
 		}
-		absPath, err := filepath.Abs(result.Path)
-		if err != nil {
-			return fmt.Errorf("failed to get absolute path for %s: %w", result.Path, err)
+		if len(failed) > 0 {
+			reporter.Message("Failed:\n" + strings.Join(failed, "\n"))
+		} else {
+			reporter.Message("Failed: (none)")
 		}
-		if err := os.Symlink(absPath, targetPath); err != nil {
-			return fmt.Errorf("failed to create symlink for %s: %w", result.Path, err)
-		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("%d symlink(s) failed", len(failed))
 	}
 	return nil
 }

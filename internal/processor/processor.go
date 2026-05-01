@@ -13,6 +13,13 @@ import (
 	"github.com/yasamari/kanan/internal/tmdb"
 )
 
+type ProgressReporter interface {
+	Start(phase string, total int)
+	Update(current, total int, detail string)
+	Message(message string)
+	Done(message string)
+}
+
 var ErrNotFound = errors.New("not found")
 
 type processor struct {
@@ -46,36 +53,56 @@ type ProcessResult struct {
 	EpisodeResolveResult tmdb.EpisodeResolveResult
 }
 
-func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool) ([]ProcessResult, error) {
-	slog.Info("Extracting info from files", "count", len(paths))
-	recordInfos, err := p.extractInfoAndFilterFiles(paths)
+func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool, progress ProgressReporter) ([]ProcessResult, error) {
+	recordInfos, err := p.extractInfoAndFilterFiles(paths, progress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract info from files: %w", err)
 	}
-	slog.Info("Finished extracting info from files", "count", len(recordInfos))
+	if progress != nil {
+		progress.Done(fmt.Sprintf("Kept %d files with metadata", len(recordInfos)))
+	}
 
+	if progress != nil {
+		progress.Start("Grouping recordings into chunks", len(recordInfos))
+	}
 	pathChunks, err := p.createPathChunks(recordInfos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create path chunks: %w", err)
 	}
-	slog.Info("Created file chunks", "chunkCount", len(pathChunks), "totalFiles", len(paths))
+	if progress != nil {
+		progress.Done(fmt.Sprintf("Created %d chunks", len(pathChunks)))
+	}
 
 	mergedSyoboiResults := make(map[syoboi.Title][]syoboi.ProgramWithRecordInfo)
+	if progress != nil {
+		progress.Start("Resolving Syoboi programs", len(pathChunks))
+	}
 
 	for i, chunk := range pathChunks {
 		resolved, err := p.syoboiResolver.Resolve(chunk.Infos, chunk.Earliest, chunk.Latest)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve syoboi programs: %w", err)
 		}
-		slog.Info("Finished resolving syoboi programs for chunk", "chunkIndex", i, "matchedPrograms", len(resolved))
+		if progress != nil {
+			progress.Update(i+1, len(pathChunks), fmt.Sprintf("chunk %d: %d title groups", i+1, len(resolved)))
+		}
 
 		for title, programs := range resolved {
 			mergedSyoboiResults[title] = append(mergedSyoboiResults[title], programs...)
 		}
 	}
+	if progress != nil {
+		progress.Done(fmt.Sprintf("Resolved %d title groups", len(mergedSyoboiResults)))
+		progress.Start("Resolving TMDB episodes", len(mergedSyoboiResults))
+	}
 
 	programIDToEpisodeResolveResult := make(map[int]*tmdb.EpisodeResolveResult)
-	for title, programs := range mergedSyoboiResults {
+	titles := make([]syoboi.Title, 0, len(mergedSyoboiResults))
+	for title := range mergedSyoboiResults {
+		titles = append(titles, title)
+	}
+	for i, title := range titles {
+		programs := mergedSyoboiResults[title]
 		searchTitle := title.Title
 		if title.ShortTitle != "" {
 			searchTitle = title.ShortTitle
@@ -89,6 +116,13 @@ func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool)
 			return nil, fmt.Errorf("failed to resolve episodes: %w", err)
 		}
 		maps.Copy(programIDToEpisodeResolveResult, results)
+		if progress != nil {
+			progress.Update(i+1, len(mergedSyoboiResults), fmt.Sprintf("%s: %d episodes", searchTitle, len(results)))
+		}
+	}
+	if progress != nil {
+		progress.Done(fmt.Sprintf("Resolved %d episodes", len(programIDToEpisodeResolveResult)))
+		progress.Start("Building rename targets", len(mergedSyoboiResults))
 	}
 
 	var processResults []ProcessResult
@@ -108,14 +142,23 @@ func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool)
 			})
 		}
 	}
+	if progress != nil {
+		progress.Done(fmt.Sprintf("Prepared %d rename targets", len(processResults)))
+	}
 
 	return processResults, nil
 }
 
-func (p *processor) extractInfoAndFilterFiles(paths []string) ([]record.Info, error) {
+func (p *processor) extractInfoAndFilterFiles(paths []string, progress ProgressReporter) ([]record.Info, error) {
 	var result []record.Info
 
-	for _, path := range paths {
+	if progress != nil {
+		progress.Start("Extracting file metadata", len(paths))
+	}
+	for i, path := range paths {
+		if progress != nil {
+			progress.Update(i+1, len(paths), path)
+		}
 		info, err := p.infoExtractor.Extract(path)
 		if err != nil {
 			slog.Error("Failed to extract info for file", "path", path, "error", err)
