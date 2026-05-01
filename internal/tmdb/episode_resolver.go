@@ -95,7 +95,7 @@ func (r *episodeResolver) Resolve(title string, seasonNumber int, isRebroadcast 
 			if err != nil {
 				return results, fmt.Errorf("failed to get season details for show ID %d season %d: %w", tvShow.ID, triedSeasonNumber, err)
 			}
-			resolved, err := r.findTVSeasonDetails(programs, tvDetails, seasonDetails)
+			resolved, err := r.findTVSeasonDetails(programs, isRebroadcast, tvDetails, seasonDetails)
 			if err != nil {
 				return results, fmt.Errorf("failed to find TV season details: %w", err)
 			}
@@ -122,7 +122,7 @@ func (r *episodeResolver) Resolve(title string, seasonNumber int, isRebroadcast 
 					slog.Debug("Failed to get season details, skipping", "showID", tvShow.ID, "seasonNumber", season.SeasonNumber, "error", err)
 					continue
 				}
-				resolved, err := r.findTVSeasonDetails(programs, tvDetails, seasonDetails)
+				resolved, err := r.findTVSeasonDetails(programs, isRebroadcast, tvDetails, seasonDetails)
 				if err != nil {
 					slog.Debug("Failed to find TV season details, skipping", "showID", tvShow.ID, "seasonNumber", season.SeasonNumber, "error", err)
 					continue
@@ -133,8 +133,9 @@ func (r *episodeResolver) Resolve(title string, seasonNumber int, isRebroadcast 
 					slog.Debug("All programs resolved", "resolvedCount", len(results), "programCount", len(programs))
 					break
 				}
+
+				slog.Debug("Not all programs resolved for this show, trying next show", "showID", tvShow.ID, "resolvedCount", len(results), "programCount", len(programs))
 			}
-			slog.Debug("Not all programs resolved for this show, trying next show", "showID", tvShow.ID, "resolvedCount", len(results), "programCount", len(programs))
 		}
 
 		if len(results) >= len(programs) {
@@ -149,11 +150,11 @@ func (r *episodeResolver) Resolve(title string, seasonNumber int, isRebroadcast 
 	return results, nil
 }
 
-func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecordInfo, tvDetails *tmdb.TVDetails, seasonDetails *tmdb.TVSeasonDetails) (map[int]*EpisodeResolveResult, error) {
+func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecordInfo, isRebroadcast bool, tvDetails *tmdb.TVDetails, seasonDetails *tmdb.TVSeasonDetails) (map[int]*EpisodeResolveResult, error) {
 	results := make(map[int]*EpisodeResolveResult)
 
 	loc, _ := time.LoadLocation(timeZone)
-	firstAirDate, err := time.Parse(time.DateOnly, tvDetails.FirstAirDate)
+	firstAirDate, err := time.ParseInLocation(time.DateOnly, tvDetails.FirstAirDate, loc)
 	if err != nil {
 		if len(tvDetails.FirstAirDate) == 4 {
 			firstAirDate, err = time.ParseInLocation("2006", tvDetails.FirstAirDate, loc)
@@ -165,23 +166,24 @@ func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecor
 	}
 
 	for _, program := range programs {
-		loc, _ := time.LoadLocation(timeZone)
-		programStartTime, err := time.ParseInLocation(syoboiTimeFormat, program.StartTime, loc)
-		if err != nil {
-			return results, fmt.Errorf("failed to parse program start time: %w", err)
-		}
-
 		for _, episode := range seasonDetails.Episodes {
-			episodeAirDate, err := time.ParseInLocation(time.DateOnly, episode.AirDate, loc)
-			if err != nil {
-				return results, fmt.Errorf("failed to parse episode air date: %w", err)
+			if !isRebroadcast {
+				programStartTime, err := time.ParseInLocation(syoboiTimeFormat, program.StartTime, loc)
+				if err != nil {
+					slog.Debug("Failed to parse program start time, skipping rebroadcast check", "programID", program.ID, "startTime", program.StartTime, "error", err)
+					break
+				}
+				episodeAirDate, err := time.ParseInLocation(time.DateOnly, episode.AirDate, loc)
+				if err != nil {
+					slog.Debug("Failed to parse episode air date, skipping rebroadcast check", "showID", tvDetails.ID, "seasonNumber", seasonDetails.SeasonNumber, "episodeNumber", episode.EpisodeNumber, "airDate", episode.AirDate, "error", err)
+					break
+				}
+
+				if programStartTime.Before(episodeAirDate) || programStartTime.Sub(episodeAirDate).Abs() > startTimeBeforeAirDateThreshold {
+					continue
+				}
 			}
 
-			isAirDateClose := programStartTime.Sub(episodeAirDate).Abs() <= startTimeBeforeAirDateThreshold
-
-			if programStartTime.Before(episodeAirDate) && isAirDateClose {
-				continue
-			}
 			if util.Similarity(program.STSubTitle, episode.Name) < episodeTitleSimilarityThreshold {
 				continue
 			}
