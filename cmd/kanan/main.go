@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	gotmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/urfave/cli/v3"
@@ -17,6 +18,7 @@ import (
 	"github.com/yasamari/kanan/internal/syoboi"
 	"github.com/yasamari/kanan/internal/tmdb"
 	"github.com/yasamari/kanan/internal/util"
+	"golang.org/x/time/rate"
 )
 
 var tsExtensions = []string{".ts", ".m2ts", ".mts"}
@@ -73,18 +75,18 @@ func main() {
 				return fmt.Errorf("rootdir argument is required")
 			}
 
-			httpClient := http.Client{
-				Transport: &util.CacheTransport{},
-			}
-
-			syoboiClient := syoboi.NewClient(httpClient)
+			syoboiClient := syoboi.NewClient(http.Client{
+				Transport: &util.RateLimitRoundTripper{
+					Transport: http.DefaultTransport,
+					Limiter:   rate.NewLimiter(rate.Every(1*time.Second), 1),
+				},
+			})
 
 			tmdbClient, err := gotmdb.Init(cmd.String("apikey"))
 			if err != nil {
 				return fmt.Errorf("failed to initialize TMDB client: %w", err)
 			}
 			tmdbClient.SetClientAutoRetry()
-			tmdbClient.SetClientConfig(httpClient)
 
 			serviceToChannelID, err := saya.GetServiceToChannelIDMap()
 			if err != nil {

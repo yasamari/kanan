@@ -10,4 +10,5 @@ require (
 	github.com/koorimizuw/aribtool v0.1.3 // indirect
 	github.com/urfave/cli/v3 v3.8.0 // indirect
 	golang.org/x/text v0.3.5 // indirect
+	golang.org/x/time v0.15.0 // indirect
 )
