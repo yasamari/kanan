@@ -184,8 +184,12 @@ func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecor
 				}
 
 				if programStartTime.Before(episodeAirDate) ||
-					programStartTime.Sub(episodeAirDate).Abs() > startTimeBeforeAirDateThreshold ||
-					program.Count != episode.EpisodeNumber {
+					programStartTime.Sub(episodeAirDate).Abs() > startTimeBeforeAirDateThreshold {
+					continue
+				}
+
+				match := program.Count == episode.EpisodeNumber || util.Similarity(program.STSubTitle, episode.Name) >= episodeTitleSimilarityThreshold
+				if !match {
 					continue
 				}
 			}
