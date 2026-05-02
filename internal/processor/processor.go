@@ -109,7 +109,9 @@ func (p *processor) ProcessMultiple(paths []string, rootDir string, dryRun bool,
 		}
 		season, searchTitle := cutSeasonFromSyoboiTitle(searchTitle)
 
-		isRebroadcast := programs[0].Program.Flag == 8 || programs[0].Program.Flag == 10
+		flag := programs[0].Program.Flag
+		// https://docs.cal.syoboi.jp/spec/proginfo-flag/
+		isRebroadcast := flag >= 8
 
 		results, err := p.episodeResolver.Resolve(searchTitle, season, isRebroadcast, programs)
 		if err != nil {
