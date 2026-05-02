@@ -167,7 +167,11 @@ func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecor
 
 	for _, program := range programs {
 		for _, episode := range seasonDetails.Episodes {
-			if !isRebroadcast {
+			if isRebroadcast {
+				if util.Similarity(program.STSubTitle, episode.Name) < episodeTitleSimilarityThreshold {
+					continue
+				}
+			} else {
 				programStartTime, err := time.ParseInLocation(syoboiTimeFormat, program.StartTime, loc)
 				if err != nil {
 					slog.Debug("Failed to parse program start time, skipping rebroadcast check", "programID", program.ID, "startTime", program.StartTime, "error", err)
@@ -179,13 +183,11 @@ func (r *episodeResolver) findTVSeasonDetails(programs []syoboi.ProgramWithRecor
 					break
 				}
 
-				if programStartTime.Before(episodeAirDate) || programStartTime.Sub(episodeAirDate).Abs() > startTimeBeforeAirDateThreshold {
+				if programStartTime.Before(episodeAirDate) ||
+					programStartTime.Sub(episodeAirDate).Abs() > startTimeBeforeAirDateThreshold ||
+					program.Count != episode.EpisodeNumber {
 					continue
 				}
-			}
-
-			if util.Similarity(program.STSubTitle, episode.Name) < episodeTitleSimilarityThreshold {
-				continue
 			}
 
 			results[program.ID] = &EpisodeResolveResult{
